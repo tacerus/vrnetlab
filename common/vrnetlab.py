@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 
 import datetime
-import math
 import logging
+import math
 import os
 import random
+import re
 import subprocess
 import telnetlib
+import time
+
+MAX_RETRIES=60
+
+# Global list of ports that we want to set up forwarding from container IP ->
+# mgmt IP of router (usually 10.0.0.15). Each entry consists of the protocol,
+# the source port (on the outside of the container) and the destination port
+# (on the virtual router).
+HOST_FWDS = [
+    ('tcp', 22, 22),      # SSH
+    ('udp', 161, 161),    # SNMP
+    ('tcp', 830, 830),    # NETCONF
+    ('tcp', 80, 80),      # HTTP
+    ('tcp', 443, 443),    # HTTPS
+]
 
 def gen_mac(last_octet=None):
     """ Generate a random MAC address that is in the qemu OUI space and that
@@ -36,22 +52,26 @@ def run_command(cmd, cwd=None, background=False):
 
 class VM:
     def __str__(self):
-        return self.__class__.__name__
+        # TODO: use this in the logger?!
+        return f"{self.__class__.__name__}[{self.num}]"
 
 
     def __init__(self, username, password, disk_image=None, num=0, ram=4096):
         self.logger = logging.getLogger()
+        self.start_time = datetime.datetime.now()
 
         # username / password to configure
         self.username = username
         self.password = password
 
         self.num = num
+        self.image = disk_image
 
         self.running = False
         self.spins = 0
         self.p = None
         self.tn = None
+        self.qm = None
 
         #  various settings
         self.uuid = None
@@ -60,11 +80,12 @@ class VM:
         self.num_nics = 0
         self.nics_per_pci_bus = 26 # tested to work with XRv
         self.smbios = []
+
         self.qemu_args = ["qemu-system-x86_64", "-display", "none", "-machine", "pc" ]
         self.qemu_args.extend(["-monitor", "tcp:0.0.0.0:40%02d,server,nowait" % self.num])
         self.qemu_args.extend(["-m", str(ram),
-                               "-serial", "telnet:0.0.0.0:50%02d,server,nowait" % self.num,
-                               "-drive", "if=ide,file=%s" % disk_image])
+                               "-serial", "telnet:0.0.0.0:50%02d,server,nowait" % self.num])
+        self.qemu_args.extend(self.create_overlay_image())
         # enable hardware assist if KVM is available
         if os.path.exists("/dev/kvm"):
             self.qemu_args.insert(1, '-enable-kvm')
@@ -72,8 +93,7 @@ class VM:
 
 
     def start(self):
-        self.logger.info("Starting %s" % self.__class__.__name__)
-        self.start_time = datetime.datetime.now()
+        self.logger.info("Starting %s" % self)
 
         cmd = list(self.qemu_args)
 
@@ -110,8 +130,43 @@ class VM:
         except:
             pass
 
-        self.qm = telnetlib.Telnet("127.0.0.1", 4000 + self.num)
-        self.tn = telnetlib.Telnet("127.0.0.1", 5000 + self.num)
+        for i in range(1, MAX_RETRIES+1):
+            try:
+                self.qm = telnetlib.Telnet("127.0.0.1", 4000 + self.num)
+                break
+            except:
+                self.logger.info("Unable to connect to qemu monitor (port {}), retrying in a second (attempt {})".format(4000 + self.num, i))
+                time.sleep(1)
+            if i == MAX_RETRIES:
+                raise QemuBroken("Unable to connect to qemu monitor on port {}".format(4000 + self.num))
+
+        for i in range(1, MAX_RETRIES+1):
+            try:
+                self.tn = telnetlib.Telnet("127.0.0.1", 5000 + self.num)
+                break
+            except:
+                self.logger.info("Unable to connect to qemu monitor (port {}), retrying in a second (attempt {})".format(5000 + self.num, i))
+                time.sleep(1)
+            if i == MAX_RETRIES:
+                raise QemuBroken("Unable to connect to qemu monitor on port {}".format(5000 + self.num))
+        try:
+            outs, errs = self.p.communicate(timeout=2)
+            self.logger.info("STDOUT: %s" % outs)
+            self.logger.info("STDERR: %s" % errs)
+        except:
+            pass
+
+    def gen_host_forwards(self, mgmt_ip='10.0.0.15', offset=2000):
+        """Generate the host forward argument for qemu
+        HOST_FWDS contain the ports we want to forward and allows mapping a
+        container (source) port to a different destination port on the VR/VM.
+        We do a straight mapping here and let socat do the port mapping. Since
+        multiple source ports can be mapped to the same destination port, we
+        first unique the set of ports.
+        """
+        fwd_ports = {(proto, dst_port) for proto, src_port, dst_port in HOST_FWDS}
+        # hostfwd=tcp::2022-10.0.0.15:22,...
+        return ",".join("hostfwd=%s::%d-%s:%d" % (proto, port + offset, mgmt_ip, port) for proto, port in fwd_ports)
 
 
     def gen_mgmt(self):
@@ -120,10 +175,15 @@ class VM:
         res = []
         # mgmt interface is special - we use qemu user mode network
         res.append("-device")
-        res.append(self.nic_type + ",netdev=p%(i)02d,mac=%(mac)s"
-                              % { 'i': 0, 'mac': gen_mac(0) })
+        # vEOS-lab requires its Ma1 interface to be the first in the bus, so let's hardcode it
+        if 'vEOS-lab' in self.image:
+            res.append(self.nic_type + ",netdev=p%(i)02d,mac=%(mac)s,bus=pci.1,addr=0x2"
+                       % { 'i': 0, 'mac': gen_mac(0) })
+        else:
+            res.append(self.nic_type + ",netdev=p%(i)02d,mac=%(mac)s"
+                       % { 'i': 0, 'mac': gen_mac(0) })
         res.append("-netdev")
-        res.append("user,id=p%(i)02d,net=10.0.0.0/24,tftp=/tftpboot,hostfwd=tcp::2022-10.0.0.15:22,hostfwd=tcp::2830-10.0.0.15:830" % { 'i': 0 })
+        res.append("user,id=p%(i)02d,net=10.0.0.0/24,tftp=/tftpboot,%(hostfwd)s" % { 'i': 0, 'hostfwd': self.gen_host_forwards() })
 
         return res
 
@@ -132,7 +192,12 @@ class VM:
         """ Generate qemu args for the normal traffic carrying interface(s)
         """
         res = []
-        for i in range(1, self.num_nics+1):
+        # vEOS-lab requires its Ma1 interface to be the first in the bus, so start normal nics at 2
+        if 'vEOS-lab' in self.image:
+            range_start = 2
+        else:
+            range_start = 1
+        for i in range(range_start, self.num_nics+1):
             # calc which PCI bus we are on and the local add on that PCI bus
             pci_bus = math.floor(i/self.nics_per_pci_bus) + 1
             addr = (i % self.nics_per_pci_bus) + 1
@@ -146,10 +211,32 @@ class VM:
                        'mac': gen_mac(i)
                     })
             res.append("-netdev")
-            res.append("socket,id=p%(i)02d,listen=:100%(i)02d"
-                       % { 'i': i })
+            res.append("socket,id=p%(i)02d,listen=:%(j)02d"
+                       % { 'i': i, 'j': i + 10000 })
         return res
 
+    @property
+    def overlay_disk_image(self) -> str:
+        """Generate the overlay disk image name for VM instance
+
+        The overlay image name is derived from the base image name and the num
+        attribute (unique per VM instance).  For example the SROS_lc(slot=1)
+        first linecard uses the name sros-1-overlay.qcow2. This ensures that
+        each VM gets its own overlay.
+        """
+        return re.sub(r'(\.[^.]+$)', fr'-{self.num}-overlay\1', self.image)
+
+    def create_overlay_image(self):
+        """Creates an overlay disk image
+
+        If one does not exist it is created. Return an array of parameters to
+        extend qemu_args. A subclass may want to override this for using
+        specific drive id.
+        """
+        if not os.path.exists(self.overlay_disk_image):
+            self.logger.debug("Creating overlay disk image")
+            run_command(["qemu-img", "create", "-f", "qcow2", "-b", self.image, self.overlay_disk_image])
+        return ["-drive", "if=ide,file=%s" % self.overlay_disk_image]
 
 
     def stop(self):
@@ -165,8 +252,17 @@ class VM:
         try:
             self.p.communicate(timeout=10)
         except:
-            self.p.kill()
-            self.p.communicate(timeout=10)
+            try:
+                # this construct is included as an example at
+                # https://docs.python.org/3.6/library/subprocess.html but has
+                # failed on me so wrapping in another try block. It was this
+                # communicate() that failed with:
+                # ValueError: Invalid file object: <_io.TextIOWrapper name=3 encoding='ANSI_X3.4-1968'>
+                self.p.kill()
+                self.p.communicate(timeout=10)
+            except:
+                # just assume it's dead or will die?
+                self.p.wait(timeout=10)
 
 
 
@@ -207,10 +303,11 @@ class VM:
             try:
                 self.bootstrap_spin()
             except EOFError:
-                self.logger.error("Telnet session was disconncted, restarting")
+                self.logger.error("Telnet session was disconnected, restarting")
                 self.restart()
 
-
+    def bootstrap_spin(self):
+        raise NotImplementedError()
 
     def check_qemu(self):
         """ Check health of qemu. This is mostly just seeing if there's error
@@ -233,39 +330,79 @@ class VM:
             self.stop()
             self.start()
 
+    def wait_config(self, show_cmd, expect, spins=90):
+        """ Some configuration takes some time to "show up".
+            To make sure the device is really ready, wait here.
+        """
+        self.logger.debug('waiting for {} to appear in {}'.format(expect, show_cmd))
+        wait_spins = 0
+        # 10s * 90 = 900s = 15min timeout
+        while wait_spins < spins:
+            # On some devices (Huawei VRP), the command to disable paging
+            # only has a temporary effect?!
+            # To make sure we're not getting paged output, send the no_paging_command
+            # always, if the attribute exists on the extended VM class.
+            try:
+                self.wait_write(self.no_paging_command, wait=None)
+            except AttributeError:
+                pass
+            self.wait_write(show_cmd, wait=None)
+            _, match, data = self.tn.expect([expect.encode('UTF-8')], timeout=10)
+            self.logger.trace(data.decode('UTF-8'))
+            if match:
+                self.logger.debug('a wild {} has appeared!'.format(expect))
+                return True
+            wait_spins += 1
+        self.logger.error('{} not found in {}'.format(expect, show_cmd))
+        return False
+
+    @property
+    def version(self):
+        """Read version number from VERSION environment variable
+
+        The VERSION environment variable is set at build time using the value
+        from the makefile. If the environment variable is not defined please add
+        the variables in the Dockerfile (see csr)"""
+        version = os.environ.get("VERSION")
+        if version is not None:
+            return version
+        raise ValueError("The VERSION environment variable is not set")
 
 
 class VR:
     def __init__(self, username, password):
         self.logger = logging.getLogger()
+        self.vms = []
 
         try:
             os.mkdir("/tftpboot")
         except:
             pass
 
-
     def update_health(self, exit_status, message):
         health_file = open("/health", "w")
         health_file.write("%d %s" % (exit_status, message))
         health_file.close()
 
-
+    def start_socat(self, src_offset=0, dst_offset=2000):
+        for proto, src_port, dst_port in HOST_FWDS:
+            run_command(["socat", "%s-LISTEN:%d,fork" % (proto.upper(), src_port + src_offset),
+                         "%s:127.0.0.1:%d" % (proto.upper(), dst_port + dst_offset)],
+                         background=True)
 
     def start(self):
         """ Start the virtual router
         """
-        self.logger.debug("Starting vrnetlab %s" % self.__class__.__name__)
-        self.logger.debug("VMs: %s" % self.vms)
-        run_command(["socat", "TCP-LISTEN:22,fork", "TCP:127.0.0.1:2022"], background=True)
-        run_command(["socat", "TCP-LISTEN:830,fork", "TCP:127.0.0.1:2830"], background=True)
+        self.logger.debug("Starting vrnetlab %s", self)
+        self.logger.debug("VMs: %s", self.vms)
+        self.start_socat()
 
         started = False
         while True:
             all_running = True
             for vm in self.vms:
                 vm.work()
-                if vm.running != True:
+                if not vm.running:
                     all_running = False
 
             if all_running:
@@ -277,4 +414,20 @@ class VR:
                 else:
                     self.update_health(1, "starting")
 
+class VR_Installer:
+    def __init__(self):
+        self.logger = logging.getLogger()
+        self.vm = None
 
+    def install(self):
+        vm =  self.vm
+        while not vm.running:
+            self.logger.trace("%s working", self)
+            vm.work()
+        self.logger.debug("%s running, shutting down", self)
+        vm.stop()
+        self.logger.info("Installation complete")
+
+class QemuBroken(Exception):
+    """ Our Qemu instance is somehow broken
+    """

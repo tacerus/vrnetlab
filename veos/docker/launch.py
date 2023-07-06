@@ -51,6 +51,7 @@ class VEOS_vm(vrnetlab.VM):
 
         if self.spins > 300:
             # too many spins with no result ->  give up
+            self.logger.info("To many spins with no result, restarting")
             self.stop()
             self.start()
             return
@@ -98,6 +99,10 @@ class VEOS_vm(vrnetlab.VM):
         # configure mgmt interface
         self.wait_write("interface Management 1")
         self.wait_write("ip address 10.0.0.15/24")
+        self.wait_write("exit")
+        self.wait_write("management api http-commands")
+        self.wait_write("protocol unix-socket")
+        self.wait_write("no shutdown")
         self.wait_write("exit")
         self.wait_write("exit")
         self.wait_write("copy running-config startup-config")

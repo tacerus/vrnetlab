@@ -1,4 +1,4 @@
-FROM debian:stable
+FROM debian:bullseye
 MAINTAINER Kristian Larsson <kristian@spritelink.net>
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,12 +13,14 @@ RUN apt-get update -qy \
     qemu-kvm \
  && rm -rf /var/lib/apt/lists/*
 
-ARG IMAGE
-COPY $IMAGE /
-COPY install_vmx.sh /
-RUN /install_vmx.sh
+ARG VERSION
+ENV VERSION=${VERSION}
+COPY vmx /vmx
 COPY *.py /
+COPY juniper.conf /
 
-EXPOSE 22 830 5000 10000-10099
+EXPOSE 22 161/udp 830 5000 57400 10000-10099
+# mgmt and console ports for re1
+EXPOSE 1022 1161/udp 1830 5001
 HEALTHCHECK CMD ["/healthcheck.py"]
-ENTRYPOINT ["/launch_vmx.py"]
+ENTRYPOINT ["/launch.py"]

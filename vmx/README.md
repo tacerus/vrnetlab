@@ -26,6 +26,17 @@ and thus taking a very long time. You will get a lot of trace output during
 this process so at least you can see what's going on. I think it's worth the
 longer build time since we build images few times but run them many.
 
+The router can run in standalone mode (single routing engine) or redundant mode
+(dual routing engines). This is controller with a runtime configuration options
+`--dual-re`. At build time, we build the VCP machines for both modes of
+operation: a standalone RE (files in `/vmx/re`) and dual RE (files in
+`/vmx/re{0,1}`). At runtime the VCP(s) are started from the correct
+directories.
+
+The bootstrap configuration is provided to the device via a "config-drive".
+During the install phase, the file `juniper.conf` is used to populate the
+metadata-usb image that is attached to the device.
+
 If you want, you can tag the resulting docker image with something else, like
 `my-repo.example.com/vr-vmx` and then push it to your repo.  The tag is the
 same as the version of the JUNOS image, so if you have vmx-15.1F4.15.tgz your
@@ -43,6 +54,7 @@ with the following images:
  * vmx-bundle-15.1F6.9.tgz  MD5:eb128cffde6ab29fdb27b2f52301c5f9
  * vmx-bundle-16.1R1.7.tgz  MD5:d96766848731c12c0492e3ae2349b426
  * vmx-bundle-16.1R2.11.tgz  MD5:24bc389420bf02fb6ede36afa79a0a19
+ * vmx-bundle-17.2R1.13.tgz  MD5:64569e60a2fd671aad565c7bd3745e88
 
 It is NOT working with the following images:
 
@@ -61,8 +73,31 @@ If you want to look at the startup process you can specify `-i -t` to docker
 run and you'll get an interactive terminal, do note that docker will terminate
 as soon as you close it though. Use `-d` for long running routers.
 
-The vFPC has a serial port that is exposed on TCP port 5001. Normally you don't
+The vFPC has a serial port that is exposed on TCP port 5002. Normally you don't
 need to interact with it but I imagine it could be useful for some debugging.
+
+You can provide additional configuration, to be merged with running
+configuration on startup. Pass the complete configuration file in the correct
+format in the `EXTRA_CONFIG` environment variable to the container.
+Assuming you have the configuration stored in a file `extra-config.conf`, to
+read it into an environment variable use this:
+
+```
+docker run --privileged -it --name vmx15 --env EXTRA_CONFIG="`cat extra-config.conf`" vrnetlab/vr-vmx:15.1F6.9 --trace
+```
+
+By default the virtual router runs in standalone mode - a single routing
+engine. To change the mode to dual RE, pass `--dual-re` to the launch script.
+The second RE console is exposed on port 5001. The management ports (NETCONF,
+SSH, SNMP) are exposed on the container IP, offset by 1000.
+
+```
+docker run --privileged -d --name vmx15-dual-re vrnetlab/vr-vmx:15.1F6.9 --trace --dual-re
+# connect to re0
+ssh vrnetlab@$CONTAINER_IP -p 22
+# connect to re1
+ssh vrnetlab@$CONTAINER_IP -p 1022
+```
 
 System requirements
 -------------------
@@ -92,15 +127,6 @@ licenses which means bandwidth licenses are added together, before which only
 the bandwidth license with the highest capacity would be used. In 16.1 the
 evaluation period of 30 days was removed to the benefit of a perpetual
 evaluation license but still with a global throughput cap of 1Mbps.
-
-##### Q: Why aren't you using config-drive to inject the config instead of serial?
-A: It is true that we could use a "config-drive" / the metadata-usb image on
-the VCP to inject a config. I opted for the serial driver as it was easier to
-start off with - I had already written it for SR-OS whereas I would have to
-spend some time on fixing a config-drive builder. I suppose it could prove more
-reliable than serial-hackery but we also have to face things like password
-encryption, i.e. how can we feed a plain-text password in that configuration
-file?
 
 ##### Q: I'm getting this error: qemu-system-x86_64: /build/qemu-XXUWBP/qemu-2.1+dfsg/hw/usb/dev-storage.c:236: usb_msd_send_status: Assertion `s->csw.sig == cpu_to_le32(0x53425355)' failed.
 A: Get a newer kernel & qemu. I've seen this on Ubuntu 15.10. Upgrading to

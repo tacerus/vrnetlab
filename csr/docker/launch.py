@@ -46,7 +46,7 @@ class CSR_vm(vrnetlab.VM):
             self.license = True
 
         super(CSR_vm, self).__init__(username, password, disk_image=disk_image)
-
+        self.nic_type = "virtio-net-pci"
         self.install_mode = install_mode
         self.num_nics = 9
 
@@ -97,6 +97,11 @@ class CSR_vm(vrnetlab.VM):
         if match: # got a match!
             if ridx == 0: # login
                 if self.install_mode:
+                    self.wait_write("", wait=None)
+                    self.wait_write("", None)
+                    self.wait_write("enable", wait=">")
+                    self.wait_write("clear platform software vnic-if nvtable")
+                    self.wait_write("")
                     self.running = True
                     return
 
@@ -137,7 +142,10 @@ class CSR_vm(vrnetlab.VM):
 
         self.wait_write("hostname csr1000v")
         self.wait_write("username %s privilege 15 password %s" % (self.username, self.password))
-        self.wait_write("ip domain-name example.com")
+        if int(self.version.split('.')[0]) >= 16:
+           self.wait_write("ip domain name example.com")
+        else:
+           self.wait_write("ip domain-name example.com")
         self.wait_write("crypto key generate rsa modulus 2048")
 
         self.wait_write("interface GigabitEthernet1")

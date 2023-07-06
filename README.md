@@ -12,13 +12,16 @@ It supports:
  * Arista vEOS
  * Cisco CSR1000v
  * Cisco Nexus NX-OS (using Titanium emulator)
- * Cisco XRv (not XRv9000)
+ * Cisco XRv
+ * Cisco XRv 9000
  * Juniper vMX
  * Juniper vQFX
  * Nokia VSR
  
 I talk a little about it during my presentation about TeraStream testing at
-the NetNod autum meeting 2016 - https://youtu.be/R_vCdGkGeSk?t=9m25s
+the NetNod autumn meeting 2016 - https://youtu.be/R_vCdGkGeSk?t=9m25s
+
+Brian Linkletter has written a good introduction too https://www.brianlinkletter.com/vrnetlab-emulate-networks-using-kvm-and-docker/
 
 
 Usage
@@ -161,9 +164,9 @@ docker run -d --name vr-xcon --link vr1 --link vr2 --link vr3 vr-xcon --p2p vr1/
 See topology-machine/README.md for details on topology machine which can help
 you with managing more complex topologies.
 
-The containers expose port 22 for SSH, port 830 for NETCONF and port 5000 is
-mapped to the virtual serial device (use telnet). All the NICs of the virtual
-routers are exposed via TCP ports in the range 10001-10099.
+The containers expose port 22 for SSH, port 161 for SNMP, port 830 for NETCONF
+and port 5000 is mapped to the virtual serial device (use telnet). All the NICs
+of the virtual routers are exposed via TCP ports in the range 10001-10099.
 
 Use `docker rm -f vr1` to stop and remote a virtual router.
 
@@ -279,10 +282,79 @@ See the README file of each virtual router type for CPU, RAM and disk
 requirements.
 
 
-Docker healtcheck
+Low performance / virtual routers not starting properly
+-------------------------------------------------------
+If you are having problems with performance, like routers not starting or being
+very slow, there are a few knobs to tweak in order to improve the situation.
+
+The basic problem is an unfortunate combination of CPU throttling and process
+scheduling causing cache thrasing which in turn leads to terrible performance.
+No detailed measurements have been done to confirm this exact behaviour but the
+recommended remedy has been confirmed working in multiple cases.
+
+vrnetlab runs virtual machines using qemu/KVM, which appear just as normal
+processes in Linux and are thus subject to the Linux process scheduler. If a
+process wants to do work it will be scheduled to run on a core. Now, if not all
+cores are used, APM will throttle down some of the cores such that the workload
+can run on the remaining, say 3 out of 12 cores.  The Linux scheduler will try
+to schedule processes on the cores with the higher clock speed but if you have
+more VMs than cores with high clock speed than it will start moving VMs around.
+L1/L2 caches are not shared by CPU cores, only L3.  Moving a process from one
+core to another inevitably means that the cache is evicted. When processes are
+moved around continuously we get cache thrasing and this appears to lower
+performance for the VMs significantly. For some virtual routers it is to the
+point where we hit various watchdog timeouts and the VMs will restart.
+
+The very first step is to make sure you aren't trying to run too many virtual
+routers on the same physical host. Some virtual routers, like Nokia SROS, has a
+rather low idle CPU usage of a few percent typically. Others, like Cisco XRV9k
+and Juniper vMX have a forwarding plane that is busy-looping over multiple CPU
+cores, thus consuming the entire CPU core. Trying to schedule multiple such
+virtual machines over the same CPU cores can lead to failure.
+
+To improve performance, we can start by changing the CPU governor in Linux to
+`performance`, for example using `cpupower frequency-set -g performance`. It
+likely won't help much but try it first since it's considerably easier than the
+following steps.
+
+Disable Advanced Power Management (APM) or similar in BIOS. This will
+completely prevent the CPU cores from throttling down and they will run at
+their designed maximum clock frequency. This probably means turbo boost
+(increasing clock frequency on a smaller subset of cores while decreasing the
+frequency on remaining cores to remain at the same power and temperature
+envelope) will be disabled too. Performance across all cores will however be
+much more deterministic. This alone usually means that the Linux process
+scheduler will now keep processes on the same cores instead of moving them
+around. Before only some of the cores would run at a higher frequency and so
+would be more attractive to schedule work on. With all cores at the same
+frequency, there is no reason for the process scheduler to move processes
+around. This removes the main cause of cache thrashing. At least that's the
+simplified view of it but it appears to be working rather well in reality.
+
+If performance is still not adequate the next step would be to disable
+hyperthreading. Hyperthreading is a technology to expose two logical cores that
+are executed by the same physical core. It's a strategy to avoid pipeline
+stalls, essentially where the CPU waits for memory. By having two logical
+threads, the CPU core can switch to the other thread whenever it needs to wait
+for memory lookups. It increases total concurrent throughput, however, each
+logical thread will run slower than if it had run directly on a physical CPU
+core.
+
+You can avoid the effects of hyperthreading by only scheduling your qemu
+processes on half of the cores. You would need to inspect /proc/cpuinfo to
+determine the exact logical core layout and make sure you only schedule
+processes on one logical thread of each physical core. However, since you would
+then only use half of the threads, it is easier to just disable hyperthreading
+in BIOS altogether.
+
+Applying the mentioned mitigations has so far resolved performance issues in
+all cases. Report if it doesn't for you.
+
+
+Docker healthcheck
 -----------------
-Docker v1.12 includes a healtcheck feature that would be really sweet to use to
-tell if the router has been bootstrapped or not.
+vrnetlab containers use the Docker healthcheck mechanism to report whether
+they've started up properly or not.
 
 
 FUAQ - Frequently or Unfrequently Asked Questions
@@ -348,6 +420,10 @@ GitLab features a built-in Docker registry which will be used per default - all
 you need to do is enable the registry for your vrnetlab project. The necessary
 information will be exposed as env vars in GitLab CI which is picked up by the
 build config.
+
+The CI runner executing the jobs must have the tag 'vrnetlab'. Make sure this
+runner supports running VMs (has KVM) and allows the execution of sibling
+docker containers.
 
 If you want, you can use an external docker registry by explicitly configuring
 the following environment variables:

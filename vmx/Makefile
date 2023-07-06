@@ -12,16 +12,13 @@ IMAGE_GLOB=*.tgz
 # vmx-bundle-17.1R1.8.tgz
 # vmx-bundle-16.1R4-S2.2.tgz
 # vmx-bundle-17.1R1-S1.tgz
-VERSION=$(shell echo $(IMAGE) | sed -e 's/.\+[^0-9]\([0-9][0-9]\.[0-9][A-Z][0-9]\+\(\.[0-9]\+\|-S[0-9]\+\(\.[0-9]\+\)\?\)\)[^0-9].*$$/\1/')
+VERSION=$(shell echo $(IMAGE) | sed -e 's/.\+[^0-9]\([0-9][0-9]\.[0-9][A-Z][0-9]\+\(\.[0-9]\+\|-[SD][0-9]\+\(\.[0-9]\+\)\?\)\)[^0-9].*$$/\1/')
+
+EXTRA_INSTALL_ARGS=--dual-re
 
 -include ../makefile-sanity.include
 -include ../makefile.include
+-include ../makefile-install.include
 
-docker-pre-build:
-	-cat cidfile | xargs --no-run-if-empty docker rm -f
-	-rm cidfile
-
-docker-build: docker-build-common
-	docker run --cidfile cidfile --privileged $(REGISTRY)vr-$(VR_NAME):$(VERSION) --trace --install
-	docker commit --change='ENTRYPOINT ["/launch_vmx.py"]' $$(cat cidfile) $(REGISTRY)vr-$(VR_NAME):$(VERSION)
-	docker rm -f $$(cat cidfile)
+docker-build-image-copy:
+	./vmx-extract.sh $(IMAGE)
