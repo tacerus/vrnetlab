@@ -14,7 +14,7 @@ Tested booting and responding to SSH:
 Usage
 -----
 ```
-docker run -d --privileged --name my-vsrx-box vr-vsrx:12.1X47-D15.4
+docker run -d --privileged --name my-vsrx-box vrnetlab/vr-vsrx:12.1X47-D15.4
 ```
 
 
