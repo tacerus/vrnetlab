@@ -243,9 +243,8 @@ class VM:
         specific drive id.
         """
         if not os.path.exists(self.overlay_disk_image):
-            self.logger.debug(f"Creating overlay disk image {self.overlay_disk_image} for {self.image}")
-            format = self._overlay_disk_image_format()
-            self.logger.debug(run_command(["qemu-img", "create", "-f", "qcow2", "-F", format, "-b", self.image, self.overlay_disk_image]))
+            self.logger.debug("Creating overlay disk image")
+            run_command(["qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", self.image, self.overlay_disk_image])
         return ["-drive", "if=ide,file=%s" % self.overlay_disk_image]
 
 
