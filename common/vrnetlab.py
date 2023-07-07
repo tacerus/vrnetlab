@@ -300,7 +300,8 @@ class VM:
 
         if wait:
             self.logger.trace("waiting for '%s' on %s" % (wait, con_name))
-            res = con.read_until(wait.encode())
+            #res = con.read_until(wait.encode())
+            (ridx, match, res) = con.expect([str.encode(wait)], 3)
             self.logger.trace("read from %s: %s" % (con_name, res.decode()))
         self.logger.debug("writing to %s: %s" % (con_name, cmd))
         con.write("{}\r".format(cmd).encode())
