@@ -391,7 +391,7 @@ class VR:
             pass
 
     def update_health(self, exit_status, message):
-        health_file = open("/health", "w")
+        health_file = open("/tmp/health", "w")
         health_file.write("%d %s" % (exit_status, message))
         health_file.close()
 

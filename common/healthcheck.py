@@ -3,7 +3,7 @@
 import sys
 
 try:
-    health_file = open("/health", "r")
+    health_file = open("/tmp/health", "r")
     health = health_file.read()
     health_file.close()
 except FileNotFoundError:

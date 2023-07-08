@@ -29,9 +29,9 @@ logging.Logger.trace = trace
 
 class VSRX_vm(vrnetlab.VM):
     def __init__(self, username, password):
-        for e in os.listdir("/"):
+        for e in os.listdir("/opt/images"):
             if re.search(".qcow2$", e):
-                disk_image = "/" + e
+                disk_image = "/opt/images/" + e
         super(VSRX_vm, self).__init__(username, password, disk_image=disk_image, ram=6144)
         self.qemu_args.extend(["-smp", "2"])
         self.nic_type = "virtio-net-pci"
