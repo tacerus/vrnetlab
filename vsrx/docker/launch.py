@@ -27,6 +27,9 @@ def trace(self, message, *args, **kws):
         self._log(TRACE_LEVEL_NUM, message, args, **kws)
 logging.Logger.trace = trace
 
+# expose REST API
+vrnetlab.HOST_FWDS.append(('tcp', 3000, 3000))
+
 class VSRX_vm(vrnetlab.VM):
     def __init__(self, username, password):
         for e in os.listdir("/opt/images"):
@@ -96,6 +99,8 @@ class VSRX_vm(vrnetlab.VM):
         self.wait_write(self.password, "Retype new password:")
         self.wait_write("set interfaces fxp0 unit 0 family inet address 10.0.0.15/24", "#")
         self.wait_write("delete system license", "#")
+        self.wait_write("commit", "#")
+        self.wait_write("set system services rest http addresses 10.0.0.15", "#")
         self.wait_write("commit", "#")
         self.wait_write("quit", "#")
         self.logger.info("completed bootstrap configuration")
