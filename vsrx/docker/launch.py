@@ -120,8 +120,17 @@ if __name__ == '__main__':
     logger = logging.getLogger()
 
     logger.setLevel(logging.DEBUG)
+    logEnv = os.environ.get('LOG_LEVEL')
     if args.trace:
         logger.setLevel(1)
+    elif logEnv:
+        if logEnv.isnumeric():
+            logEnv = int(logEnv)
+        try:
+            logger.setLevel(logEnv)
+        except ValueError:
+            print(f'Illegal log level "{logEnv}"', file=sys.stderr)
+            sys.exit(1)
 
     vr = VSRX(args.username, args.password)
     vr.start()
