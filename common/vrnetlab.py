@@ -156,7 +156,7 @@ class VM:
         except:
             pass
 
-    def gen_host_forwards(self, mgmt_ip='10.0.0.15', offset=2000):
+    def gen_host_forwards(self, mgmt_ip='10.0.0.15', offset=4000):
         """Generate the host forward argument for qemu
         HOST_FWDS contain the ports we want to forward and allows mapping a
         container (source) port to a different destination port on the VR/VM.
@@ -386,7 +386,7 @@ class VR:
         health_file.write("%d %s" % (exit_status, message))
         health_file.close()
 
-    def start_socat(self, src_offset=0, dst_offset=2000):
+    def start_socat(self, src_offset=0, dst_offset=4000):
         for proto, src_port, dst_port in HOST_FWDS:
             run_command(["socat", "%s-LISTEN:%d,fork" % (proto.upper(), src_port + src_offset),
                          "%s:127.0.0.1:%d" % (proto.upper(), dst_port + dst_offset)],
