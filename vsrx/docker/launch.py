@@ -55,8 +55,7 @@ class VSRX_vm(vrnetlab.VM):
                 # Login
                 self.wait_write("\r", None)
                 self.wait_write("root", wait="login:")
-                self.wait_write("Juniper", wait="Password:")
-                self.wait_write("", wait="root@vsrx%")
+                self.wait_write("", wait="root@:~ #")
                 self.logger.info("Login completed")
 
                 # run main config!
@@ -89,15 +88,14 @@ class VSRX_vm(vrnetlab.VM):
         self.wait_write("configure", ">")
         self.wait_write("set system services ssh", "#")
         self.wait_write("set system services netconf ssh", "#")
-        self.wait_write("delete system login user vagrant", "#")
         self.wait_write("set system login user %s class super-user authentication plain-text-password" % ( self.username ), "#")
         self.wait_write(self.password, "New password:")
         self.wait_write(self.password, "Retype new password:")
         self.wait_write("set system root-authentication plain-text-password", "#")
         self.wait_write(self.password, "New password:")
         self.wait_write(self.password, "Retype new password:")
-        self.wait_write("delete interfaces ge-0/0/0", "#")
-        self.wait_write("set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.15/24", "#")
+        self.wait_write("set interfaces fxp0 unit 0 family inet address 10.0.0.15/24", "#")
+        self.wait_write("delete system license", "#")
         self.wait_write("commit", "#")
         self.wait_write("quit", "#")
         self.logger.info("completed bootstrap configuration")
