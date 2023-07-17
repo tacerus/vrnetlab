@@ -5,3 +5,6 @@ ARG IMAGE
 COPY $IMAGE /opt/images/
 COPY *-pfe-* /opt/images/
 COPY launch.py /usr/local/bin/
+
+# :-/ for /dev/net/tun
+USER root
