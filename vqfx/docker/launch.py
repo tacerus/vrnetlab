@@ -31,10 +31,10 @@ logging.Logger.trace = trace
 
 class VQFX_vcp(vrnetlab.VM):
     def __init__(self, username, password):
-        for e in os.listdir("/"):
+        for e in os.listdir("/opt/images"):
             if re.search("-re-.*.qcow2", e):
-                vrnetlab.run_command(["qemu-img", "create", "-b", "/" + e, "-f", "qcow2", "/vcp.qcow2"])
-        super(VQFX_vcp, self).__init__(username, password, disk_image="/vcp.qcow2", ram=2048)
+                vrnetlab.run_command(["qemu-img", "create", "-b", "/opt/images/" + e, "-f", "qcow2", "/opt/images/vcp.qcow2"])
+        super(VQFX_vcp, self).__init__(username, password, disk_image="/opt/images/vcp.qcow2", ram=2048)
         self.num_nics = 12
 
 
@@ -156,10 +156,10 @@ class VQFX_vcp(vrnetlab.VM):
 
 class VQFX_vpfe(vrnetlab.VM):
     def __init__(self):
-        for e in os.listdir("/"):
+        for e in os.listdir("/opt/images"):
             if re.search("-pfe-.*.qcow2", e):
-                vrnetlab.run_command(["qemu-img", "create", "-b", "/" + e, "-f", "qcow2", "/vpfe.qcow2"])
-        super(VQFX_vpfe, self).__init__(None, None, disk_image="/vpfe.qcow2", num=1, ram=2048)
+                vrnetlab.run_command(["qemu-img", "create", "-b", "/opt/images/" + e, "-f", "qcow2", "/opt/images/vpfe.qcow2"])
+        super(VQFX_vpfe, self).__init__(None, None, disk_image="/opt/images/vpfe.qcow2", num=1, ram=2048)
         self.num_nics = 0
 
 
