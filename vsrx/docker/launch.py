@@ -101,6 +101,7 @@ class VSRX_vm(vrnetlab.VM):
         self.wait_write("delete system license", "#")
         self.wait_write("commit", "#")
         self.wait_write("set system services rest http addresses 10.0.0.15", "#")
+        self.wait_write(f'set system host-name {os.uname()[1]}')
         self.wait_write("commit", "#")
         self.wait_write("quit", "#")
         self.logger.info("completed bootstrap configuration")
