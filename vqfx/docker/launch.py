@@ -91,10 +91,10 @@ class VQFX_vcp(vrnetlab.VM):
             return
 
         # logged_in_prompt prompt for v20+ versions
-        logged_in_prompt = b"root@:RE:0%"
+        #logged_in_prompt = b"root@:RE:0%"
 
-        if self.version["major"] < 20:
-            logged_in_prompt = b"root@vqfx-re:RE:0%"
+        #if self.version["major"] < 20:
+        logged_in_prompt = b"root@vqfx-re:RE:0%"
 
         (ridx, match, res) = self.tn.expect([b"login:", logged_in_prompt], 1)
         if match:  # got a match!
@@ -103,8 +103,8 @@ class VQFX_vcp(vrnetlab.VM):
                 self.wait_write("root", wait=None)
 
                 # v19 has Juniper password for root login
-                if self.version["major"] < 20:
-                    self.wait_write("Juniper", wait="Password:")
+                #if self.version["major"] < 20:
+                self.wait_write("Juniper", wait="Password:")
             if ridx == 1:
                 # run main config!
                 self.bootstrap_config()
