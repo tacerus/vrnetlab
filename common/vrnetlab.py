@@ -75,6 +75,7 @@ class VM:
         self.password = password
 
         self.num = num
+        disk_image = f'/opt/images/{disk_image}'
         self.image = disk_image
 
         self.running = False
