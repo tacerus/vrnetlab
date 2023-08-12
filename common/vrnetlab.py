@@ -418,7 +418,8 @@ class VM:
             "hostfwd=udp::2161-10.0.0.15:161,"
             "hostfwd=tcp::2830-10.0.0.15:830,"
             "hostfwd=tcp::2080-10.0.0.15:80,"
-            "hostfwd=tcp::2443-10.0.0.15:443"
+            "hostfwd=tcp::2443-10.0.0.15:443,"
+            "hostfwd=tcp::3500-10.0.0.15:3000"
         )
         return res
 
@@ -735,6 +736,9 @@ class VR:
             )
             run_command(
                 ["socat", "TCP-LISTEN:443,fork", "TCP:127.0.0.1:2443"], background=True
+            )
+            run_command(
+                ["socat", "TCP-LISTEN:3000,fork", "TCP:127.0.0.1:3500"], background=True
             )
 
         started = False
