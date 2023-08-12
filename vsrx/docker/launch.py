@@ -27,18 +27,17 @@ def trace(self, message, *args, **kws):
         self._log(TRACE_LEVEL_NUM, message, args, **kws)
 logging.Logger.trace = trace
 
-# expose REST API
-vrnetlab.HOST_FWDS.append(('tcp', 3000, 3000))
-
 class VSRX_vm(vrnetlab.VM):
-    def __init__(self, username, password):
+    def __init__(self, hostname, username, password, conn_mode):
         for e in os.listdir("/opt/images"):
             if re.search(".qcow2$", e):
-                disk_image = "/opt/images/" + e
-        super(VSRX_vm, self).__init__(username, password, disk_image=disk_image, ram=6144)
+                disk_image = e
+        super(VSRX_vm, self).__init__(username, password, disk_image=disk_image, ram=4096)
         self.qemu_args.extend(["-smp", "2"])
         self.nic_type = "virtio-net-pci"
+        self.conn_mode = conn_mode
         self.num_nics = 10
+        self.hostname = hostname
 
     def bootstrap_spin(self):
         """ This function should be called periodically to do work.
@@ -58,7 +57,7 @@ class VSRX_vm(vrnetlab.VM):
                 # Login
                 self.wait_write("\r", None)
                 self.wait_write("root", wait="login:")
-                self.wait_write("", wait="root@:~ #")
+                self.wait_write("", wait="root@:~ # ")
                 self.logger.info("Login completed")
 
                 # run main config!
@@ -75,7 +74,7 @@ class VSRX_vm(vrnetlab.VM):
         # no match, if we saw some output from the router it's probably
         # booting, so let's give it some more time
         if res != b'':
-            self.logger.trace("OUTPUT:\n%s" % res.decode())
+            self.logger.trace("OUTPUT: %s" % res.decode())
             # reset spins if we saw some output
             self.spins = 0
 
@@ -87,8 +86,13 @@ class VSRX_vm(vrnetlab.VM):
         """ Do the actual bootstrap config
         """
         self.logger.info("applying bootstrap configuration")
-        self.wait_write("cli", "%")
+        self.wait_write("cli", "#")
+        self.wait_write("set cli screen-length 0", ">")
+        self.wait_write("set cli screen-width 511", ">")
+        self.wait_write("set cli complete-on-space off", ">")
         self.wait_write("configure", ">")
+        self.wait_write("top delete", "#")
+        self.wait_write("yes", "Delete everything under this level? [yes,no] (no) ")
         self.wait_write("set system services ssh", "#")
         self.wait_write("set system services netconf ssh", "#")
         self.wait_write("set system login user %s class super-user authentication plain-text-password" % ( self.username ), "#")
@@ -98,43 +102,44 @@ class VSRX_vm(vrnetlab.VM):
         self.wait_write(self.password, "New password:")
         self.wait_write(self.password, "Retype new password:")
         self.wait_write("set interfaces fxp0 unit 0 family inet address 10.0.0.15/24", "#")
-        self.wait_write("delete system license", "#")
-        self.wait_write("commit", "#")
-        self.wait_write("set system services rest http addresses 10.0.0.15", "#")
-        self.wait_write(f'set system host-name {os.uname()[1]}')
-        self.wait_write("commit", "#")
-        self.wait_write("quit", "#")
+        # set interface fxp0 on dedicated management vrf, to avoid 10.0.0.0/24 to overlap with any "testing" network
+        self.wait_write("set system management-instance", "#")
+        self.wait_write("set routing-instances mgmt_junos description management-instance", "#")
+        # allow NATed outgoing traffic (set the default route on the management vrf)
+        self.wait_write("set routing-instances mgmt_junos routing-options static route 0.0.0.0/0 next-hop 10.0.0.2", "#")
+        self.wait_write("commit")
+        self.wait_write("exit")
+        # write another exist as sometimes the first exit from exclusive edit abrupts before command finishes
+        self.wait_write("exit", wait=">")
         self.logger.info("completed bootstrap configuration")
 
 class VSRX(vrnetlab.VR):
-    def __init__(self, username, password):
+    def __init__(self, hostname, username, password, conn_mode):
         super(VSRX, self).__init__(username, password)
-        self.vms = [ VSRX_vm(username, password) ]
+        self.vms = [ VSRX_vm(hostname, username, password, conn_mode) ]
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--trace', action='store_true', help='enable trace level logging')
-    parser.add_argument('--username', default='vrnetlab', help='Username')
-    parser.add_argument('--password', default='VR-netlab9', help='Password')
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--trace", action="store_true", help="enable trace level logging")
+    parser.add_argument("--hostname", default="vr-vsrx", help="SRX hostname")
+    parser.add_argument("--username", default="vrnetlab", help="Username")
+    parser.add_argument("--password", default="VR-netlab9", help="Password")
+    parser.add_argument("--connection-mode", default="tc", help="Connection mode to use in the datapath")
     args = parser.parse_args()
+
 
     LOG_FORMAT = "%(asctime)s: %(module)-10s %(levelname)-8s %(message)s"
     logging.basicConfig(format=LOG_FORMAT)
     logger = logging.getLogger()
 
     logger.setLevel(logging.DEBUG)
-    logEnv = os.environ.get('LOG_LEVEL')
     if args.trace:
         logger.setLevel(1)
-    elif logEnv:
-        if logEnv.isnumeric():
-            logEnv = int(logEnv)
-        try:
-            logger.setLevel(logEnv)
-        except ValueError:
-            print(f'Illegal log level "{logEnv}"', file=sys.stderr)
-            sys.exit(1)
 
-    vr = VSRX(args.username, args.password)
+    vr = VSRX(args.hostname,
+        args.username,
+        args.password,
+        conn_mode=args.connection_mode,
+    )
     vr.start()
