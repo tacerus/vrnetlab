@@ -40,7 +40,7 @@ logging.Logger.trace = trace
 class VQFX_vcp(vrnetlab.VM):
     def __init__(self, hostname, username, password, conn_mode, version, disk_image):
         super(VQFX_vcp, self).__init__(
-            username, password, disk_image=disk_image, ram=2048
+            username, password, disk_image=disk_image, ram=3072
         )
         self.num_nics = 12
         self.conn_mode = conn_mode
@@ -198,7 +198,7 @@ class VQFX_vcp(vrnetlab.VM):
 class VQFX_vpfe(vrnetlab.VM):
     def __init__(self, disk_image):
         super(VQFX_vpfe, self).__init__(
-            None, None, disk_image=disk_image, num=1, ram=2048
+            None, None, disk_image=disk_image, num=1, ram=3072
         )
         self.num_nics = 0
 
