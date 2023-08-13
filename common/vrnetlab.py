@@ -364,9 +364,9 @@ class VM:
         tc filter add dev $TAP_IF parent ffff: protocol all u32 match u8 0 0 action mirred egress redirect dev eth$INDEX
         """
 
-        with open("/home/geeko/bin/tc-tap-ifup", "w") as f:
+        with open("/etc/tc-tap-ifup", "w") as f:
             f.write(ifup_script)
-        os.chmod("/home/geeko/bin/tc-tap-ifup", 0o755)
+        os.chmod("/etc/tc-tap-ifup", 0o777)
 
     def create_macvtaps(self):
         """
@@ -560,7 +560,7 @@ class VM:
             if self.conn_mode == "tc":
                 res.append("-netdev")
                 res.append(
-                    f"tap,id=p{i:02d},ifname=tap{i},script=/home/geeko/bin/tc-tap-ifup,downscript=no"
+                    f"tap,id=p{i:02d},ifname=tap{i},script=/etc/tc-tap-ifup,downscript=no"
                 )
 
             if self.conn_mode == "macvtap":
